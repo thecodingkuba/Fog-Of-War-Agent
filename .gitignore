@@ -156,6 +156,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# This project's source package lives in env/. The uppercase ENV/ rule above
+# also matches it on case-insensitive filesystems (macOS), so un-ignore it.
+!env/
+!env/**
+env/__pycache__/
+
 # Spyder project settings
 .spyderproject
 .spyproject
