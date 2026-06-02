@@ -48,7 +48,8 @@ class GameStats:
         return "\n".join(lines)
 
 
-def _load_agent(agent_type: str, model_path: str | None, k: int, depth: int):
+def _load_agent(agent_type: str, model_path: str | None, k: int, depth: int,
+                info_model_path: str | None = None, info_weight: float = 0.0):
     if agent_type == "random":
         from agents.random_agent import RandomAgent
         return RandomAgent()
@@ -71,9 +72,13 @@ def _load_agent(agent_type: str, model_path: str | None, k: int, depth: int):
 
     elif agent_type == "info_prior":
         from agents.search_agents import InformationPriorAgent
-        if model_path is None:
-            raise ValueError("--model required for info_prior agent")
-        return InformationPriorAgent.load(model_path, k=k, depth=depth)
+        # The information-aware prior is its own trained network; prefer the
+        # dedicated --info-model checkpoint, falling back to --model.
+        path = info_model_path or model_path
+        if path is None:
+            raise ValueError("--info-model (or --model) required for info_prior agent")
+        return InformationPriorAgent.load(path, k=k, depth=depth,
+                                          info_weight=info_weight)
 
     else:
         raise ValueError(f"Unknown agent type: {agent_type!r}")
@@ -199,7 +204,15 @@ def main():
     parser = argparse.ArgumentParser(description="Fog of War Chess evaluator")
     parser.add_argument("--white", default="random", choices=AGENT_CHOICES)
     parser.add_argument("--black", default="random", choices=AGENT_CHOICES)
-    parser.add_argument("--model", default=None, help="Path to saved PPO model")
+    parser.add_argument("--model", default=None,
+                        help="Path to the baseline PPO model (Dense PPO / Policy Prior)")
+    parser.add_argument("--info-model", default=None,
+                        help="Path to the information-trained PPO model used by "
+                             "info_prior (the 'Ours' network). Falls back to --model.")
+    parser.add_argument("--info-weight", type=float, default=0.0,
+                        help="Optional inference-time info-gain bonus added to the "
+                             "info_prior scores (ablation; the learned network is "
+                             "the primary mechanism, so default 0).")
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--k", type=int, default=10,
                         help="Candidate set size for search agents")
@@ -215,15 +228,18 @@ def main():
         for name in AGENT_CHOICES:
             try:
                 tournament_agents[name] = _load_agent(
-                    name, args.model, args.k, args.depth
+                    name, args.model, args.k, args.depth,
+                    info_model_path=args.info_model, info_weight=args.info_weight
                 )
             except ValueError:
                 if args.verbose:
                     print(f"Skipping {name} (requires --model)")
         run_tournament(tournament_agents, n_games=args.games, verbose=args.verbose)
     else:
-        white = _load_agent(args.white, args.model, args.k, args.depth)
-        black = _load_agent(args.black, args.model, args.k, args.depth)
+        white = _load_agent(args.white, args.model, args.k, args.depth,
+                            info_model_path=args.info_model, info_weight=args.info_weight)
+        black = _load_agent(args.black, args.model, args.k, args.depth,
+                            info_model_path=args.info_model, info_weight=args.info_weight)
 
         print(f"Running {args.games} games: {args.white} (White) vs {args.black} (Black)")
         if args.white in ("heuristic", "policy_prior", "info_prior") or \

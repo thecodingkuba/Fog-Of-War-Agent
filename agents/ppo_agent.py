@@ -26,15 +26,13 @@ class PPOAgent:
         self._lstm_states = None
         self._episode_start = np.array([True])
 
-    def select_action(self, obs: np.ndarray, action_mask: np.ndarray,
+    def select_action(self, obs, action_mask: np.ndarray,
                       board=None, deterministic: bool = False) -> int:
-        obs_batch = obs[np.newaxis, ...]
+        # The Dict observation already carries "action_mask"; the masked policy
+        # reads it directly, so no manual mask injection is needed.
+        obs_batch = self._batch_obs(obs)
 
         if self._recurrent:
-            # Pass mask to the policy before prediction so it can apply it
-            self._model.policy.set_action_mask(
-                self._mask_tensor(action_mask)
-            )
             action, self._lstm_states = self._model.predict(
                 obs_batch,
                 state=self._lstm_states,
@@ -51,9 +49,11 @@ class PPOAgent:
 
         return int(action)
 
-    def _mask_tensor(self, action_mask: np.ndarray):
-        import torch
-        return torch.tensor(action_mask, dtype=torch.bool).unsqueeze(0)
+    @staticmethod
+    def _batch_obs(obs):
+        if isinstance(obs, dict):
+            return {k: v[np.newaxis, ...] for k, v in obs.items()}
+        return obs[np.newaxis, ...]
 
     def save(self, path: str) -> None:
         self._model.save(path)

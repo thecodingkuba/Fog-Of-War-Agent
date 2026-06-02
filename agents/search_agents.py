@@ -96,13 +96,13 @@ class PolicyPriorAgent:
         self._episode_start = np.array([True])
         self.total_nodes = 0
 
-    def select_action(self, obs: np.ndarray, action_mask: np.ndarray,
+    def select_action(self, obs, action_mask: np.ndarray,
                       board: chess.Board | None = None) -> int:
         if board is None:
             raise ValueError("PolicyPriorAgent requires board access")
 
         logits, self._lstm_state = self._model.policy.get_action_scores(
-            obs[np.newaxis], self._lstm_state, self._episode_start, action_mask
+            obs, self._lstm_state, self._episode_start
         )
         self._episode_start = np.array([False])
 
@@ -143,13 +143,13 @@ class InformationPriorAgent:
         self._episode_start = np.array([True])
         self.total_nodes = 0
 
-    def select_action(self, obs: np.ndarray, action_mask: np.ndarray,
+    def select_action(self, obs, action_mask: np.ndarray,
                       board: chess.Board | None = None) -> int:
         if board is None:
             raise ValueError("InformationPriorAgent requires board access")
 
         logits, self._lstm_state = self._model.policy.get_action_scores(
-            obs[np.newaxis], self._lstm_state, self._episode_start, action_mask
+            obs, self._lstm_state, self._episode_start
         )
         self._episode_start = np.array([False])
 
