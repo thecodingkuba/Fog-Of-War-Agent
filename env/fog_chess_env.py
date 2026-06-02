@@ -1,11 +1,12 @@
 """
 Fog of War Chess environment (Gymnasium API).
 
-This is a *partially observable* chess environment: the underlying game uses
-standard chess rules (move legality, checkmate, draws) via python-chess, but
-each player only observes the part of the board its own pieces can see. The
-hidden information is what makes the task hard, matching the proposal's goal of
-studying RL under partial observability.
+This is a *partially observable* chess environment built on python-chess. It
+uses true Fog of War rules: there is no check or checkmate, so a player may
+move into check, leave their king attacked, and the game is won by *capturing*
+the enemy king. Moves are therefore pseudo-legal (king captures and moving into
+check are allowed). Each player only observes the part of the board its own
+pieces can see, which is what makes the task hard.
 
 Observation (Dict)
 -------------------
@@ -26,7 +27,7 @@ Discrete(4096), encoded as from_square * 64 + to_square (see board_utils).
 Reward
 ------
 Returned from the perspective of the player that just moved:
-  +1.0  that player delivered checkmate (win)
+  +1.0  that player captured the enemy king (win)
    0.0  draw / ongoing
   -1.0  the move was illegal (should not happen when the mask is respected)
 
@@ -152,29 +153,36 @@ class FogChessEnv(gym.Env):
         move = action_to_move(int(action), self.board)
 
         # Safeguard: an illegal action ends the game as a loss for the mover.
-        if move not in self.board.legal_moves:
+        if move not in self.board.pseudo_legal_moves:
             obs = self._get_obs()
             info = self._info()
             info["illegal_move"] = True
             return obs, -1.0, True, False, info
 
         mover = self.board.turn
+        victim = self.board.piece_at(move.to_square)
+        king_captured = victim is not None and victim.piece_type == chess.KING
         material = self._material_gain(move) if self.shaping_coef else 0.0
         vis_before = visible_squares(self.board, mover) if self.track_info_gain else None
 
         self.board.push(move)
         self._move_count += 1
 
-        if self.shaping_coef and self.board.is_check():
-            material += CHECK_BONUS  # the side that just moved gave check
-
-        terminated = self.board.is_game_over()
-        truncated = self._move_count >= self.max_moves and not terminated
+        if (self.shaping_coef and not king_captured
+                and self.board.king(self.board.turn) is not None
+                and self.board.is_check()):
+            material += CHECK_BONUS  # the move attacks the enemy king
 
         reward = self.shaping_coef * material
-        if terminated and self.board.is_checkmate():
-            # The side that just moved delivered mate.
+        terminated = False
+        if king_captured:
+            # Fog of War win condition: the mover captured the enemy king.
+            terminated = True
             reward += 1.0
+        elif self._is_drawn():
+            terminated = True
+
+        truncated = self._move_count >= self.max_moves and not terminated
 
         obs = self._get_obs()
         info = self._info()
@@ -182,6 +190,15 @@ class FogChessEnv(gym.Env):
             vis_after = visible_squares(self.board, mover)
             info["info_gain"] = float((vis_after & ~vis_before).sum())
         return obs, reward, terminated, truncated, info
+
+    def _is_drawn(self) -> bool:
+        """Non-win terminal states: only kings remain, or no move is available."""
+        pieces = self.board.piece_map().values()
+        if all(p.piece_type == chess.KING for p in pieces):
+            return True
+        if next(iter(self.board.pseudo_legal_moves), None) is None:
+            return True
+        return False
 
     def _material_gain(self, move: chess.Move) -> float:
         """Material (in pawns) the mover gains from `move`: captures + promotion."""

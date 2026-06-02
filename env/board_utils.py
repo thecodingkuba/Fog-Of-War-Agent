@@ -20,7 +20,8 @@ import numpy as np
 
 ACTION_SPACE_SIZE = 64 * 64  # 4096
 
-# Material values (king = 0 so it is ignored by material-count evaluations).
+# Material values (king = 0 so it is ignored by material-count evaluations;
+# capturing the king is handled separately as a terminal win).
 PIECE_VALUES: dict[int, float] = {
     chess.PAWN: 1.0,
     chess.KNIGHT: 3.0,
@@ -29,6 +30,11 @@ PIECE_VALUES: dict[int, float] = {
     chess.QUEEN: 9.0,
     chess.KING: 0.0,
 }
+
+# Score given to a move that captures the enemy king. In Fog of War chess there
+# is no check/checkmate: the game is won by *capturing* the king, so this move
+# must dominate any material heuristic and any search evaluation.
+KING_CAPTURE_VALUE = 1000.0
 
 # Channel order for piece planes in the observation tensor.
 PIECE_TO_PLANE: dict[int, int] = {
@@ -46,18 +52,29 @@ def move_to_action(move: chess.Move) -> int:
     return move.from_square * 64 + move.to_square
 
 
+def fow_legal_moves(board: chess.Board) -> list[chess.Move]:
+    """
+    Legal moves under Fog of War rules.
+
+    FoW chess has no check/checkmate, so a player may move into check, leave
+    their king attacked, and capture the enemy king. That is exactly the set of
+    *pseudo-legal* moves in python-chess (which also includes castling).
+    """
+    return list(board.pseudo_legal_moves)
+
+
 def action_to_move(action: int, board: chess.Board) -> chess.Move:
     """
-    Decode an action index into a concrete legal chess.Move on `board`.
+    Decode an action index into a concrete pseudo-legal chess.Move on `board`.
 
     Because promotions are collapsed to one action, we look up the matching
-    legal move and prefer queen promotion when several promotions share the
-    same (from, to) pair. Falls back to a bare Move if nothing matches.
+    move and prefer queen promotion when several promotions share the same
+    (from, to) pair. Falls back to a bare Move if nothing matches.
     """
     from_sq = action // 64
     to_sq = action % 64
     candidates = [
-        m for m in board.legal_moves
+        m for m in board.pseudo_legal_moves
         if m.from_square == from_sq and m.to_square == to_sq
     ]
     if not candidates:
@@ -69,9 +86,9 @@ def action_to_move(action: int, board: chess.Board) -> chess.Move:
 
 
 def legal_action_mask(board: chess.Board) -> np.ndarray:
-    """Boolean mask of shape (4096,); True where a legal move exists."""
+    """Boolean mask of shape (4096,); True where a (pseudo-legal) move exists."""
     mask = np.zeros(ACTION_SPACE_SIZE, dtype=bool)
-    for move in board.legal_moves:
+    for move in board.pseudo_legal_moves:
         mask[move.from_square * 64 + move.to_square] = True
     return mask
 
@@ -103,15 +120,20 @@ def heuristic_move_scores(board: chess.Board) -> dict[chess.Move, float]:
     keeping only the top-k candidates.
     """
     scores: dict[chess.Move, float] = {}
-    for move in board.legal_moves:
+    for move in board.pseudo_legal_moves:
         s = 0.0
         victim = board.piece_at(move.to_square)
         if victim is not None:
-            s += PIECE_VALUES.get(victim.piece_type, 0.0)
+            if victim.piece_type == chess.KING:
+                s += KING_CAPTURE_VALUE
+            else:
+                s += PIECE_VALUES.get(victim.piece_type, 0.0)
         if board.is_en_passant(move):
             s += PIECE_VALUES[chess.PAWN]
         board.push(move)
-        if board.is_check():
+        # Bonus for attacking the enemy king (is_check is safe when a king is
+        # already gone, returning False).
+        if board.king(board.turn) is not None and board.is_check():
             s += 0.5
         board.pop()
         scores[move] = s
@@ -125,7 +147,7 @@ def top_k_action_mask(board: chess.Board, k: int) -> np.ndarray:
     If there are <= k legal moves, this is identical to legal_action_mask.
     Ties are broken deterministically by the move ordering python-chess yields.
     """
-    legal = list(board.legal_moves)
+    legal = list(board.pseudo_legal_moves)
     if len(legal) <= k:
         return legal_action_mask(board)
 

@@ -39,6 +39,6 @@ def information_gain(board: chess.Board, move: chess.Move) -> int:
 def information_gain_scores(board: chess.Board) -> np.ndarray:
     """Return a (4096,) float32 array of information gain for all legal moves."""
     scores = np.zeros(4096, dtype=np.float32)
-    for move in board.legal_moves:
+    for move in board.pseudo_legal_moves:
         scores[move_to_action(move)] = information_gain(board, move)
     return scores

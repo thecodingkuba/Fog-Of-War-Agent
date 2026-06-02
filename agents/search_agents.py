@@ -16,7 +16,7 @@ All agents expose:
 import numpy as np
 import chess
 
-from env.board_utils import PIECE_VALUES, move_to_action
+from env.board_utils import KING_CAPTURE_VALUE, PIECE_VALUES, move_to_action
 from search.information_gain import information_gain_scores
 from search.minimax import restricted_search
 
@@ -27,15 +27,18 @@ _INFO_W = 0.05   # info gain: 0-30 squares → adds up to ~1.5 on top of logits
 
 def _heuristic_scores(board: chess.Board) -> np.ndarray:
     scores = np.zeros(4096, dtype=np.float32)
-    for move in board.legal_moves:
+    for move in board.pseudo_legal_moves:
         a = move_to_action(move)
         victim = board.piece_at(move.to_square)
         if victim:
-            scores[a] += PIECE_VALUES.get(victim.piece_type, 0) * _CAPTURE_W
+            if victim.piece_type == chess.KING:
+                scores[a] += KING_CAPTURE_VALUE
+            else:
+                scores[a] += PIECE_VALUES.get(victim.piece_type, 0) * _CAPTURE_W
         if board.is_en_passant(move):
             scores[a] += PIECE_VALUES[chess.PAWN] * _CAPTURE_W
         board.push(move)
-        if board.is_check():
+        if board.king(board.turn) is not None and board.is_check():
             scores[a] += _CHECK_W
         board.pop()
     return scores

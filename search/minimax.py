@@ -12,7 +12,12 @@ track search budget for the "Search Nodes Evaluated" metric.
 import chess
 import numpy as np
 
-from env.board_utils import PIECE_VALUES, action_to_move, move_to_action
+from env.board_utils import (
+    KING_CAPTURE_VALUE,
+    PIECE_VALUES,
+    action_to_move,
+    move_to_action,
+)
 
 
 def _material(board: chess.Board, player: chess.Color) -> float:
@@ -29,16 +34,18 @@ def _material(board: chess.Board, player: chess.Color) -> float:
 def _negamax(board: chess.Board, depth: int, alpha: float, beta: float,
              root_player: chess.Color, nodes: list) -> float:
     nodes[0] += 1
-    if board.is_checkmate():
-        return -1000.0
-    if board.is_game_over():
-        return 0.0
+
+    # Fog of War terminal: a king has been captured. Negamax convention returns
+    # the value for the side to move, so the side missing its king has lost.
+    if board.king(chess.WHITE) is None or board.king(chess.BLACK) is None:
+        return -KING_CAPTURE_VALUE if board.king(board.turn) is None else KING_CAPTURE_VALUE
+
     if depth == 0:
         mat = _material(board, root_player)
         return mat if board.turn == root_player else -mat
 
     best = -float('inf')
-    for move in board.legal_moves:
+    for move in board.pseudo_legal_moves:
         board.push(move)
         score = -_negamax(board, depth - 1, -beta, -alpha, root_player, nodes)
         board.pop()
@@ -46,6 +53,9 @@ def _negamax(board: chess.Board, depth: int, alpha: float, beta: float,
         alpha = max(alpha, score)
         if alpha >= beta:
             break
+
+    if best == -float('inf'):
+        return 0.0  # no moves available -> drawn
     return best
 
 
@@ -61,7 +71,7 @@ def restricted_search(
     """
     board = board.copy()
     player = board.turn
-    legal = set(board.legal_moves)
+    legal = set(board.pseudo_legal_moves)
     nodes = [0]
 
     best_action, best_score = None, -float('inf')
@@ -77,7 +87,9 @@ def restricted_search(
             best_score, best_action = score, int(action)
 
     if best_action is None:
-        move = next(iter(board.legal_moves))
+        move = next(iter(board.pseudo_legal_moves), None)
+        if move is None:
+            return 0, nodes[0]
         best_action = move_to_action(move)
 
     return best_action, nodes[0]

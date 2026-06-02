@@ -10,8 +10,9 @@ small set of heuristically "reasonable" moves makes RL more efficient.
 ## What's implemented
 
 - **`env/`** — a Gymnasium Fog of War Chess environment built on `python-chess`.
-  The game uses standard chess rules, but each player only observes the squares
-  its own pieces can see. The observation is a `Dict`:
+  True FoW rules (no check/checkmate; win by capturing the enemy king;
+  pseudo-legal moves), and each player only observes the squares its own pieces
+  can see. The observation is a `Dict`:
   - `board`: `(14, 8, 8)` tensor — own pieces (6 planes), visible enemy pieces
     (6 planes), known-empty squares (1 plane), and fog/unknown squares (1 plane),
     all from the side-to-move's perspective.
@@ -140,9 +141,12 @@ Reported metrics: win/draw rates, average game length, illegal-move count
 
 ## Notes
 
-- The environment models partial observability through the **observation**
-  while keeping standard chess win/draw rules (checkmate, stalemate, threefold,
-  etc.). Games are truncated at 200 half-moves.
+- The environment uses true **Fog of War rules**: no check or checkmate — a
+  player may move into check and the game is **won by capturing the enemy
+  king**. Moves are pseudo-legal (king captures and moving into check are
+  allowed). This keeps games decisive (low draw rate), so Win Rate is a
+  meaningful metric. Games are truncated at 200 half-moves (scored as a draw),
+  and positions with only the two kings left are also draws.
 - Self-play uses a frozen opponent snapshot refreshed every
   `--opponent-update-freq` steps; before the first refresh the opponent moves
   randomly.
