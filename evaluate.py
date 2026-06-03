@@ -16,7 +16,8 @@ import numpy as np
 
 from env.fog_chess_env import FogChessEnv
 
-AGENT_CHOICES = ["random", "ppo", "heuristic", "policy_prior", "info_prior"]
+AGENT_CHOICES = ["random", "ppo", "heuristic", "policy_prior", "info_prior",
+                 "info_infer"]
 
 
 @dataclass
@@ -49,7 +50,8 @@ class GameStats:
 
 
 def _load_agent(agent_type: str, model_path: str | None, k: int, depth: int,
-                info_model_path: str | None = None, info_weight: float = 0.0):
+                info_model_path: str | None = None, info_weight: float = 0.0,
+                infer_info_weight: float = 0.05):
     if agent_type == "random":
         from agents.random_agent import RandomAgent
         return RandomAgent()
@@ -79,6 +81,17 @@ def _load_agent(agent_type: str, model_path: str | None, k: int, depth: int,
             raise ValueError("--info-model (or --model) required for info_prior agent")
         return InformationPriorAgent.load(path, k=k, depth=depth,
                                           info_weight=info_weight)
+
+    elif agent_type == "info_infer":
+        from agents.search_agents import InformationPriorAgent
+        # Inference-time information gathering: the *baseline* policy prior plus
+        # an explicit info-gain bonus at top-k selection (info_weight > 0). No
+        # info-trained network — this isolates the "other way" of being
+        # information-aware, on top of an undamaged playing-strength policy.
+        if model_path is None:
+            raise ValueError("--model required for info_infer agent")
+        return InformationPriorAgent.load(model_path, k=k, depth=depth,
+                                          info_weight=infer_info_weight)
 
     else:
         raise ValueError(f"Unknown agent type: {agent_type!r}")
@@ -213,6 +226,11 @@ def main():
                         help="Optional inference-time info-gain bonus added to the "
                              "info_prior scores (ablation; the learned network is "
                              "the primary mechanism, so default 0).")
+    parser.add_argument("--infer-info-weight", type=float, default=0.05,
+                        help="Info-gain bonus weight for the 'info_infer' agent: "
+                             "the baseline policy prior + inference-time info "
+                             "bonus (the non-training-based way to be "
+                             "information-aware). Requires --model.")
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--k", type=int, default=10,
                         help="Candidate set size for search agents")
@@ -229,7 +247,8 @@ def main():
             try:
                 tournament_agents[name] = _load_agent(
                     name, args.model, args.k, args.depth,
-                    info_model_path=args.info_model, info_weight=args.info_weight
+                    info_model_path=args.info_model, info_weight=args.info_weight,
+                    infer_info_weight=args.infer_info_weight
                 )
             except ValueError:
                 if args.verbose:
@@ -237,13 +256,15 @@ def main():
         run_tournament(tournament_agents, n_games=args.games, verbose=args.verbose)
     else:
         white = _load_agent(args.white, args.model, args.k, args.depth,
-                            info_model_path=args.info_model, info_weight=args.info_weight)
+                            info_model_path=args.info_model, info_weight=args.info_weight,
+                            infer_info_weight=args.infer_info_weight)
         black = _load_agent(args.black, args.model, args.k, args.depth,
-                            info_model_path=args.info_model, info_weight=args.info_weight)
+                            info_model_path=args.info_model, info_weight=args.info_weight,
+                            infer_info_weight=args.infer_info_weight)
 
         print(f"Running {args.games} games: {args.white} (White) vs {args.black} (Black)")
-        if args.white in ("heuristic", "policy_prior", "info_prior") or \
-           args.black in ("heuristic", "policy_prior", "info_prior"):
+        _search_agents = ("heuristic", "policy_prior", "info_prior", "info_infer")
+        if args.white in _search_agents or args.black in _search_agents:
             print(f"Search: k={args.k}, depth={args.depth}")
 
         stats = run_evaluation(white, black, n_games=args.games, verbose=args.verbose)

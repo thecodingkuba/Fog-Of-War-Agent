@@ -53,15 +53,22 @@ class SelfPlayEnv(Env):
     metadata = {"render_modes": []}
 
     def __init__(self, opponent_model=None, prune_k=None, shaping_coef=0.0,
-                 info_reward_coef=0.0):
+                 info_reward_coef=0.0, step_penalty=0.0,
+                 truncation_material_coef=0.0):
         super().__init__()
         # Information-gain shaping is NOT zero-sum, so it is applied here to the
         # learner (White) only rather than inside the negated env reward.
         self.info_reward_coef = info_reward_coef
+        # Per-move penalty on the learner (White) to discourage stalling games
+        # out to the truncation cap. Also applied only to White (non-zero-sum):
+        # a symmetric env-level penalty would cancel under the wrapper's
+        # reward - black_reward negation.
+        self.step_penalty = step_penalty
         self._env = FogChessEnv(
             prune_k=prune_k,
             shaping_coef=shaping_coef,
             track_info_gain=info_reward_coef > 0.0,
+            truncation_material_coef=truncation_material_coef,
         )
         self.observation_space = self._env.observation_space
         self.action_space = self._env.action_space
@@ -71,6 +78,14 @@ class SelfPlayEnv(Env):
 
     def set_opponent(self, model) -> None:
         self._opponent = model
+
+    def set_info_coef(self, coef: float) -> None:
+        """Update the (White-only) information-gain coefficient mid-training.
+
+        Used by InfoAnnealCallback to fade information shaping toward 0 so the
+        prior seeks information early but is ultimately optimized to win.
+        """
+        self.info_reward_coef = coef
 
     @staticmethod
     def _batch_obs(obs: dict) -> dict:
@@ -100,18 +115,20 @@ class SelfPlayEnv(Env):
     def step(self, action: int):
         # White (the learner) moves.
         obs, reward, terminated, truncated, info = self._env.step(action)
-        # Reward White for the information its own move revealed (not zero-sum).
-        white_info = self.info_reward_coef * info.get("info_gain", 0.0)
+        # White-only (non-zero-sum) shaping: reward information revealed, and
+        # apply a per-move penalty that discourages dragging games to the cap.
+        white_shaping = self.info_reward_coef * info.get("info_gain", 0.0) \
+            - self.step_penalty
         if terminated or truncated:
-            return obs, reward + white_info, terminated, truncated, info
+            return obs, reward + white_shaping, terminated, truncated, info
 
         # Black (the frozen opponent) responds.
         black_action = self._opponent_action(obs)
         obs, black_reward, terminated, truncated, info = self._env.step(black_action)
 
         # Material/check shaping is zero-sum, so negate Black's; the info-gain
-        # bonus only credits White's own move.
-        white_reward = reward - black_reward + white_info
+        # bonus and step penalty only credit White's own move.
+        white_reward = reward - black_reward + white_shaping
         return obs, white_reward, terminated, truncated, info
 
     def render(self):
@@ -157,18 +174,52 @@ class OpponentUpdateCallback(BaseCallback):
 
 
 # ---------------------------------------------------------------------------
+# Callback: linearly anneal the information-gain coefficient toward a target
+# ---------------------------------------------------------------------------
+
+
+class InfoAnnealCallback(BaseCallback):
+    """Linearly fade the info-gain reward coefficient over training.
+
+    Information shaping helps early exploration (the prior learns to seek
+    uncertainty-reducing moves) but, left at full strength, it dominates the
+    win signal and the policy stops trying to win. Annealing from `start` to
+    `final` lets info shape early behavior while the late-training objective
+    converges to actually winning.
+    """
+
+    def __init__(self, start: float, final: float, total_timesteps: int,
+                 envs, verbose: int = 0):
+        super().__init__(verbose)
+        self.start = start
+        self.final = final
+        self.total = max(1, total_timesteps)
+        self._envs = envs if isinstance(envs, (list, tuple)) else [envs]
+
+    def _on_step(self) -> bool:
+        frac = min(1.0, self.num_timesteps / self.total)
+        coef = self.start + (self.final - self.start) * frac
+        for env in self._envs:
+            env.set_info_coef(coef)
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def make_env(opponent_model=None, prune_k=None, shaping_coef=0.0,
-             info_reward_coef=0.0):
+             info_reward_coef=0.0, step_penalty=0.0,
+             truncation_material_coef=0.0):
     def _init():
         env = SelfPlayEnv(
             opponent_model,
             prune_k=prune_k,
             shaping_coef=shaping_coef,
             info_reward_coef=info_reward_coef,
+            step_penalty=step_penalty,
+            truncation_material_coef=truncation_material_coef,
         )
         return Monitor(env)
     return _init
@@ -194,6 +245,21 @@ def main():
                              "information-seeking prior (the 'Ours' network): "
                              "reward += coef * (newly revealed squares). "
                              "Use e.g. --info-reward-coef 0.02 --tag info.")
+    parser.add_argument("--info-reward-coef-final", type=float, default=None,
+                        help="If set, linearly anneal the info-gain coef from "
+                             "--info-reward-coef down to this value over "
+                             "training (e.g. --info-reward-coef 0.01 "
+                             "--info-reward-coef-final 0.0). Info shapes early "
+                             "play, then fades so the policy learns to win.")
+    parser.add_argument("--step-penalty", type=float, default=0.0,
+                        help="Per-move penalty on the learner (White) to "
+                             "discourage stalling games to the truncation cap "
+                             "(e.g. 0.001). Applied non-zero-sum to White only.")
+    parser.add_argument("--truncation-material-coef", type=float, default=0.0,
+                        help="If >0, truncated (capped) games are scored by the "
+                             "mover's material balance (capped at +/-0.9) "
+                             "instead of a flat draw, so a material lead "
+                             "converts to a result (e.g. 0.05).")
     parser.add_argument("--resume", default=None)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--n-steps", type=int, default=256)
@@ -217,7 +283,9 @@ def main():
     train_env = DummyVecEnv([
         make_env(opponent_model=None, prune_k=args.prune_k,
                  shaping_coef=args.shaping_coef,
-                 info_reward_coef=args.info_reward_coef)
+                 info_reward_coef=args.info_reward_coef,
+                 step_penalty=args.step_penalty,
+                 truncation_material_coef=args.truncation_material_coef)
     ])
 
     policy_kwargs = dict(
@@ -250,10 +318,15 @@ def main():
             tensorboard_log=log_dir,
         )
 
+    # Eval drives best_model selection, so it should reward *winning*, not
+    # information gathering: disable the info bonus and step penalty here.
+    # Material-based truncation scoring is kept so a material lead still counts.
     eval_env = DummyVecEnv([
         make_env(opponent_model=None, prune_k=args.prune_k,
                  shaping_coef=args.shaping_coef,
-                 info_reward_coef=args.info_reward_coef)
+                 info_reward_coef=0.0,
+                 step_penalty=0.0,
+                 truncation_material_coef=args.truncation_material_coef)
     ])
     eval_callback = EvalCallback(
         eval_env,
@@ -273,12 +346,26 @@ def main():
         verbose=1,
     )
 
+    callbacks = [eval_callback, opponent_callback]
+    if args.info_reward_coef_final is not None:
+        callbacks.append(InfoAnnealCallback(
+            start=args.info_reward_coef,
+            final=args.info_reward_coef_final,
+            total_timesteps=args.timesteps,
+            envs=[inner_env],
+            verbose=1,
+        ))
+
+    anneal_msg = (f" -> {args.info_reward_coef_final}"
+                  if args.info_reward_coef_final is not None else "")
     print(f"[{tag}] Training for {args.timesteps:,} timesteps "
           f"(prune_k={args.prune_k}, shaping_coef={args.shaping_coef}, "
-          f"info_reward_coef={args.info_reward_coef})...")
+          f"info_reward_coef={args.info_reward_coef}{anneal_msg}, "
+          f"step_penalty={args.step_penalty}, "
+          f"truncation_material_coef={args.truncation_material_coef})...")
     model.learn(
         total_timesteps=args.timesteps,
-        callback=[eval_callback, opponent_callback],
+        callback=callbacks,
         reset_num_timesteps=not bool(args.resume),
     )
 

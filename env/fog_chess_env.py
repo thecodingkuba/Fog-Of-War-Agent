@@ -65,7 +65,8 @@ class FogChessEnv(gym.Env):
     metadata = {"render_modes": ["ansi"]}
 
     def __init__(self, prune_k: int | None = None, max_moves: int = 200,
-                 shaping_coef: float = 0.0, track_info_gain: bool = False):
+                 shaping_coef: float = 0.0, track_info_gain: bool = False,
+                 truncation_material_coef: float = 0.0):
         super().__init__()
         self.prune_k = prune_k
         self.max_moves = max_moves
@@ -79,6 +80,13 @@ class FogChessEnv(gym.Env):
         # of newly revealed squares) of the move just played in info["info_gain"].
         # Used by the self-play wrapper to train an information-seeking prior.
         self.track_info_gain = track_info_gain
+        # When >0, a game that hits the move cap is no longer a flat draw: the
+        # mover receives a (capped) reward proportional to its material balance,
+        # so a material lead converts to a positive outcome instead of stalling
+        # to 0. Capped below the +1.0 king-capture win so winning stays optimal.
+        # The self-play wrapper's zero-sum negation propagates this to White
+        # whether the truncating ply was White's or Black's.
+        self.truncation_material_coef = truncation_material_coef
 
         self.board = chess.Board()
         self._move_count = 0
@@ -183,6 +191,13 @@ class FogChessEnv(gym.Env):
             terminated = True
 
         truncated = self._move_count >= self.max_moves and not terminated
+        if truncated and self.truncation_material_coef:
+            # Convert a stalled game into a material-weighted outcome (mover's
+            # perspective), capped so it can never match/exceed a real win.
+            balance = self._material_balance(mover)
+            reward += float(
+                np.clip(self.truncation_material_coef * balance, -0.9, 0.9)
+            )
 
         obs = self._get_obs()
         info = self._info()
@@ -199,6 +214,14 @@ class FogChessEnv(gym.Env):
         if next(iter(self.board.pseudo_legal_moves), None) is None:
             return True
         return False
+
+    def _material_balance(self, player: chess.Color) -> float:
+        """Material (in pawns) from `player`'s perspective; kings excluded."""
+        balance = 0.0
+        for piece in self.board.piece_map().values():
+            val = PIECE_VALUES.get(piece.piece_type, 0.0)
+            balance += val if piece.color == player else -val
+        return balance
 
     def _material_gain(self, move: chess.Move) -> float:
         """Material (in pawns) the mover gains from `move`: captures + promotion."""
