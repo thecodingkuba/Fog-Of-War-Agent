@@ -102,6 +102,7 @@ def run_evaluation(
     black_agent,
     n_games: int = 100,
     verbose: bool = False,
+    opening_plies: int = 4,
 ) -> GameStats:
     env = FogChessEnv()
     stats = GameStats()
@@ -114,6 +115,24 @@ def run_evaluation(
         for agent in (white_agent, black_agent):
             if hasattr(agent, 'reset_episode'):
                 agent.reset_episode()
+
+        # Randomized opening: play a few uniformly-random legal half-moves
+        # before the agents take over. Deterministic agents would otherwise
+        # replay byte-for-byte identical games, collapsing every matchup to a
+        # single repeated game; random openings restore per-game variety so
+        # win rates are statistically meaningful. Agents' LSTM state simply
+        # initializes from the resulting opening position.
+        for _ in range(opening_plies):
+            legal = np.where(info["action_mask"])[0]
+            if len(legal) == 0:
+                break
+            obs, reward, terminated, truncated, info = env.step(
+                int(np.random.choice(legal))
+            )
+            half_moves += 1
+            if terminated or truncated:
+                done = True
+                break
 
         while not done:
             mask = info["action_mask"]
@@ -160,6 +179,7 @@ def run_tournament(
     agents: dict[str, object],
     n_games: int = 50,
     verbose: bool = False,
+    opening_plies: int = 4,
 ) -> None:
     """
     Round-robin self-play tournament. Each pair plays n_games as White and
@@ -180,9 +200,11 @@ def run_tournament(
         b = agents[b_name]
 
         # A as White, B as Black
-        stats_ab = run_evaluation(a, b, n_games=n_games, verbose=verbose)
+        stats_ab = run_evaluation(a, b, n_games=n_games, verbose=verbose,
+                                  opening_plies=opening_plies)
         # A as Black, B as White
-        stats_ba = run_evaluation(b, a, n_games=n_games, verbose=verbose)
+        stats_ba = run_evaluation(b, a, n_games=n_games, verbose=verbose,
+                                  opening_plies=opening_plies)
 
         a_wins = stats_ab.white_wins + stats_ba.black_wins
         b_wins = stats_ab.black_wins + stats_ba.white_wins
@@ -238,6 +260,12 @@ def main():
                         help="Minimax search depth (0 = prior only, no search)")
     parser.add_argument("--tournament", action="store_true",
                         help="Run full round-robin tournament across all agent types")
+    parser.add_argument("--opening-plies", type=int, default=4,
+                        help="Number of uniformly-random legal half-moves played "
+                             "at the start of each game. Deterministic agents "
+                             "would otherwise replay identical games; this gives "
+                             "diverse, statistically meaningful win rates. Set 0 "
+                             "for a fixed start position.")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -253,7 +281,8 @@ def main():
             except ValueError:
                 if args.verbose:
                     print(f"Skipping {name} (requires --model)")
-        run_tournament(tournament_agents, n_games=args.games, verbose=args.verbose)
+        run_tournament(tournament_agents, n_games=args.games, verbose=args.verbose,
+                       opening_plies=args.opening_plies)
     else:
         white = _load_agent(args.white, args.model, args.k, args.depth,
                             info_model_path=args.info_model, info_weight=args.info_weight,
@@ -267,7 +296,8 @@ def main():
         if args.white in _search_agents or args.black in _search_agents:
             print(f"Search: k={args.k}, depth={args.depth}")
 
-        stats = run_evaluation(white, black, n_games=args.games, verbose=args.verbose)
+        stats = run_evaluation(white, black, n_games=args.games, verbose=args.verbose,
+                               opening_plies=args.opening_plies)
         print("\n" + stats.report(args.white.capitalize(), args.black.capitalize()))
 
 

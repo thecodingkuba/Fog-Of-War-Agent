@@ -27,7 +27,10 @@ class PPOAgent:
         self._episode_start = np.array([True])
 
     def select_action(self, obs, action_mask: np.ndarray,
-                      board=None, deterministic: bool = False) -> int:
+                      board=None, deterministic: bool = True) -> int:
+        # Play the policy's best (argmax) move at eval rather than sampling.
+        # Policy-only play has no search to recover from a bad sample, and the
+        # search agents act greedily, so sampling unfairly handicapped `ppo`.
         # The Dict observation already carries "action_mask"; the masked policy
         # reads it directly, so no manual mask injection is needed.
         obs_batch = self._batch_obs(obs)

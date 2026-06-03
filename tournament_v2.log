@@ -1,0 +1,37 @@
+/Users/sandeep/.matplotlib is not a writable directory
+Matplotlib created a temporary cache directory at /var/folders/r_/ptsbgs6s4jndvjcwy_n2z90w0000gn/T/matplotlib-p_3alq2k because there was an issue with the default path (/Users/sandeep/.matplotlib); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/sandeep/.cache/fontconfig
+	/Users/sandeep/.fontconfig
+2026-06-02 19:18:44.114 system_profiler[99350:39930329] XType: Using static font registry.
+Matplotlib is building the font cache; this may take a moment.
+
+Round-robin tournament: 6 agents, 100 games per direction
+
+  random           vs ppo              | random: 49/200 (24.5%)  ppo: 98/200 (49.0%)
+  random           vs heuristic        | random: 0/200 (0.0%)  heuristic: 200/200 (100.0%)
+  random           vs policy_prior     | random: 4/200 (2.0%)  policy_prior: 195/200 (97.5%)
+  random           vs info_prior       | random: 6/200 (3.0%)  info_prior: 193/200 (96.5%)
+  random           vs info_infer       | random: 1/200 (0.5%)  info_infer: 198/200 (99.0%)
+  ppo              vs heuristic        | ppo: 0/200 (0.0%)  heuristic: 143/200 (71.5%)
+  ppo              vs policy_prior     | ppo: 11/200 (5.5%)  policy_prior: 76/200 (38.0%)
+  ppo              vs info_prior       | ppo: 17/200 (8.5%)  info_prior: 48/200 (24.0%)
+  ppo              vs info_infer       | ppo: 14/200 (7.0%)  info_infer: 87/200 (43.5%)
+  heuristic        vs policy_prior     | heuristic: 73/200 (36.5%)  policy_prior: 43/200 (21.5%)
+  heuristic        vs info_prior       | heuristic: 72/200 (36.0%)  info_prior: 26/200 (13.0%)
+  heuristic        vs info_infer       | heuristic: 52/200 (26.0%)  info_infer: 44/200 (22.0%)
+  policy_prior     vs info_prior       | policy_prior: 44/200 (22.0%)  info_prior: 32/200 (16.0%)
+  policy_prior     vs info_infer       | policy_prior: 39/200 (19.5%)  info_infer: 48/200 (24.0%)
+  info_prior       vs info_infer       | info_prior: 34/200 (17.0%)  info_infer: 40/200 (20.0%)
+
+--- Win Rate Summary ---
+Agent                   Win Rate    Avg Nodes/Game
+----------------------------------------------------
+random                      6.0%                 0
+ppo                        14.0%                 0
+heuristic                  54.0%             26243
+policy_prior               39.7%             30655
+info_prior                 33.3%             33135
+info_infer                 41.7%             31150
