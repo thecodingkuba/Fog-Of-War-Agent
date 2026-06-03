@@ -57,6 +57,55 @@ python3.12 evaluate.py --tournament \
    policy-only `ppo` (14%), which in turn beats `random` (6%). Note `ppo` is
    evaluated deterministically (argmax); sampled play was far weaker.
 
+## Top-k ablation (k = 1, 2, 4, 8, 10)
+
+Same tournament setup as above (100 games per direction, depth 2,
+`--opening-plies 4`). Raw logs: `tournament_k1.log`, `tournament_k2.log`,
+`tournament_k4.log`, `tournament_k8.log`, `tournament_v2.log` (k=10).
+
+Reproduce a single k:
+
+```bash
+python3.12 evaluate.py --tournament \
+    --model checkpoints/baseline/best_model \
+    --info-model checkpoints/info_v2/best_model \
+    --games 100 --k K --depth 2 --infer-info-weight 0.05 --opening-plies 4
+```
+
+### Win rate vs. k
+
+| Agent | k=1 | k=2 | k=4 | k=8 | k=10 |
+| --- | --- | --- | --- | --- | --- |
+| `heuristic` | **97.3%** | **86.5%** | **68.5%** | **56.9%** | **54.0%** |
+| `info_infer` | 36.1% | 36.3% | 35.8% | 41.3% | 41.7% |
+| `policy_prior` | 37.3% | 35.6% | 35.8% | 39.6% | 39.7% |
+| `ppo` (no search) | 36.7% | 33.0% | 27.7% | 17.8% | 14.0% |
+| `info_prior` | 7.1% | 13.2% | 20.4% | 29.5% | 33.3% |
+| `random` | 25.2% | 16.9% | 10.4% | 7.0% | 6.0% |
+
+### Avg search nodes / game vs. k
+
+| Agent | k=1 | k=2 | k=4 | k=8 |
+| --- | --- | --- | --- | --- |
+| `heuristic` | 462 | 2,206 | 7,891 | 19,540 |
+| `info_infer` | 1,663 | 4,448 | 11,329 | 23,154 |
+| `policy_prior` | 1,671 | 4,419 | 10,916 | 23,872 |
+| `info_prior` | 2,454 | 5,238 | 12,016 | 25,778 |
+
+### Ablation takeaways
+
+1. **`heuristic` dominates at every k and is strongest at small k** (97.3% at
+   k=1). Its top-ranked move is almost always tactically correct, so it needs
+   little search. Its edge shrinks as k grows but it never loses the lead.
+2. **`info_prior` is the most k-sensitive**: 7.1% at k=1, climbing to 33.3%
+   at k=10. The info-reward training demotes the best tactical move out of the
+   #1 slot, but good moves remain in the broader candidate set — wider pruning
+   + search recover them.
+3. **`info_infer` ≥ `policy_prior` at every k** (~36–41%), with flat performance
+   across k — robust priors whose top move is already solid.
+4. **Efficiency**: `heuristic` uses the fewest nodes at every k and wins;
+   `info_prior` uses the most nodes and is weakest among search agents.
+
 ## Caveats / future work
 
 - Search-vs-search matchups are draw-heavy (games often reach the 200-move cap),
