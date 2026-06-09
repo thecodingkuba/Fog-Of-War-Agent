@@ -243,7 +243,7 @@ def main():
                         help="Path to the baseline PPO model (Dense PPO / Policy Prior)")
     parser.add_argument("--info-model", default=None,
                         help="Path to the information-trained PPO model used by "
-                             "info_prior (the 'Ours' network). Falls back to --model.")
+                             "info_prior. Falls back to --model.")
     parser.add_argument("--info-weight", type=float, default=0.0,
                         help="Optional inference-time info-gain bonus added to the "
                              "info_prior scores (ablation; the learned network is "

@@ -2,10 +2,10 @@
 Action-prior agents: score legal moves with a prior, take top-k, run
 restricted minimax over the candidates.
 
-Paper baselines:
+Agents:
   HeuristicPriorAgent   — MVV-LVA captures + check bonus
   PolicyPriorAgent      — PPO action distribution (AlphaZero-style)
-  InformationPriorAgent — PPO scores + FoW information gain (Ours)
+  InformationPriorAgent — PPO scores + FoW information gain
 
 All agents expose:
   select_action(obs, action_mask, board) → int
@@ -124,11 +124,10 @@ class PolicyPriorAgent:
 
 class InformationPriorAgent:
     """
-    PPO scores augmented with FoW information gain + restricted search (Ours).
+    PPO scores augmented with FoW information gain + restricted search.
 
-    Prior = π_prior(a|x_t) + info_weight × InfoGain(a)
-    Matches paper diagram: FoW Information Signal feeds into Top-k selection
-    alongside the Action Prior Network output.
+    Prior = pi_prior(a|x_t) + info_weight * InfoGain(a): the information-gain
+    signal feeds into top-k candidate selection alongside the policy prior.
     """
 
     def __init__(self, model, k: int = 10, depth: int = 2,

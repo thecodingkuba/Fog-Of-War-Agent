@@ -5,3 +5,4 @@ torch>=2.1.0
 stable-baselines3>=2.2.0
 sb3-contrib>=2.2.0
 tensorboard>=2.14.0
+matplotlib>=3.7.0

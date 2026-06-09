@@ -32,7 +32,7 @@ small set of heuristically "reasonable" moves makes RL more efficient.
   `PPOAgent`, and three prior-based search agents (`HeuristicPriorAgent`,
   `PolicyPriorAgent`, `InformationPriorAgent`) that rank moves, keep the top-k,
   and run a restricted minimax search. `PolicyPriorAgent` uses the baseline
-  PPO policy as the prior; `InformationPriorAgent` (Ours) uses a *separately
+  PPO policy as the prior; `InformationPriorAgent` uses a *separately
   trained* information-seeking policy (see `--info-reward-coef`), optionally
   plus an inference-time information-gain bonus for ablations.
 
@@ -60,11 +60,15 @@ Baseline PPO with the full (legal) action space:
 python train.py --tag baseline
 ```
 
-Information-aware prior — the "Ours" network (PPO self-play with an added
-information-gain reward, so the learned prior seeks uncertainty-reducing moves):
+Information-aware prior (PPO self-play with an added information-gain reward,
+so the learned prior seeks uncertainty-reducing moves). The reported model
+anneals the info reward toward 0 and adds a step penalty plus material-based
+truncation scoring so the prior seeks information early but ultimately learns
+to win:
 
 ```bash
-python train.py --info-reward-coef 0.02 --tag info
+python train.py --info-reward-coef 0.01 --info-reward-coef-final 0.0 \
+    --step-penalty 0.001 --truncation-material-coef 0.05 --tag info_v2
 ```
 
 PPO with action-space pruning during training (keep top-k=10 heuristic moves
@@ -85,11 +89,12 @@ heuristic):
 | Dense PPO | `ppo` | `checkpoints/baseline` |
 | Policy Prior + Search | `policy_prior` | `checkpoints/baseline` |
 | Heuristic Prior + Search | `heuristic` | none |
-| Information Prior + Search (Ours) | `info_prior` | `checkpoints/info` |
+| Information Prior + Search | `info_prior` | `checkpoints/info_v2` |
 
 ```bash
-python train.py --tag baseline                    # Dense PPO + Policy Prior
-python train.py --info-reward-coef 0.02 --tag info # Information Prior (Ours)
+python train.py --tag baseline   # Dense PPO + Policy Prior
+python train.py --info-reward-coef 0.01 --info-reward-coef-final 0.0 \
+    --step-penalty 0.001 --truncation-material-coef 0.05 --tag info_v2  # Information Prior
 ```
 
 Useful flags: `--timesteps`, `--eval-games`, `--checkpoint-freq`,
@@ -126,13 +131,13 @@ python evaluate.py --games 100
 python evaluate.py --white ppo --black random --model checkpoints/baseline/best_model --games 100
 
 # Information-prior search agent (uses its own info-trained network)
-python evaluate.py --white info_prior --black heuristic \
-    --info-model checkpoints/info/best_model --k 10 --depth 2 --games 100
+python evaluate.py --white info_prior --black policy_prior \
+    --info-model checkpoints/info_v2/best_model --k 10 --depth 2 --games 100
 
 # Full round-robin tournament: baseline net for ppo/policy_prior, info net for info_prior
 python evaluate.py --tournament \
     --model checkpoints/baseline/best_model \
-    --info-model checkpoints/info/best_model \
+    --info-model checkpoints/info_v2/best_model \
     --games 50 --k 10 --depth 2
 ```
 

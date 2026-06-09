@@ -1,3 +1,9 @@
+# macOS
+.DS_Store
+
+# matplotlib cache (figure generation)
+figures/.mplconfig/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

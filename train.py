@@ -242,8 +242,8 @@ def main():
                              "(0 disables; reward += coef * material gained).")
     parser.add_argument("--info-reward-coef", type=float, default=0.0,
                         help="Information-gain reward coefficient. >0 trains an "
-                             "information-seeking prior (the 'Ours' network): "
-                             "reward += coef * (newly revealed squares). "
+                             "information-seeking prior: reward += coef * "
+                             "(newly revealed squares). "
                              "Use e.g. --info-reward-coef 0.02 --tag info.")
     parser.add_argument("--info-reward-coef-final", type=float, default=None,
                         help="If set, linearly anneal the info-gain coef from "
